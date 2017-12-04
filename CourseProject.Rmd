@@ -1,0 +1,126 @@
+---
+title: "Coursera: Data Science - Practical Machine Learning"
+author: "Matthew Lau"
+date: "December 3, 2017"
+output: html_document
+---
+
+```{r}
+library(caret)
+library(dplyr)
+library(randomForest)
+```
+
+## Background:
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## This Project:
+This project consists of using the HAR dataset to train a prediction model that is used to predict 20 different cases.
+
+## Citation:
+Data obtained from the HAR project. 
+        Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises.         Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM 
+        SIGCHI, 2013.
+        
+        Read more: http://groupware.les.inf.puc-rio.br/har#wle_paper_section#ixzz50GLvB7QF
+
+## Data Preparation
+
+### Download data
+
+```{r}
+trainUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+download.file(trainUrl, destfile="pml-training.csv")
+download.file(testUrl, destfile="pml-testing.csv")
+```
+
+### Ingest and set NA's
+load data and clean data, set all NA, #DIV/0 and "" as NA
+
+```{r}
+training <- read.csv("pml-training.csv", na.strings=c("NA","#DIV/0!",""))
+testing <- read.csv("pml-testing.csv", na.strings=c("NA","#DIV/0!",""))
+```
+
+set all data with numerical data as numeric class, remove columns where the entire column is NA. Remove columns which are not in the test data, not used to predict.
+
+```{r}
+testing <- testing %>% 
+        mutate_at(vars(user_name, new_window), as.factor) %>%
+        mutate_at(vars(-user_name, -new_window), as.numeric) %>%
+        select_if(colSums(!is.na(.)) > 0) %>%
+        select(-X, -user_name, -raw_timestamp_part_1, -raw_timestamp_part_2, -cvtd_timestamp)
+training <- training %>% 
+        mutate_at(vars(user_name, new_window, classe), as.factor) %>%
+        mutate_at(vars(-user_name, -new_window, -classe), as.numeric) %>%
+        select_if(colnames(.) %in% c("classe", colnames(testing)))
+        
+
+```
+
+## Removing columns with near zero variance
+
+```{r}
+training_nzv <- nearZeroVar(training,saveMetrics=TRUE)
+training <- training[,training_nzv$nzv==FALSE]
+
+testing_nzv <- nearZeroVar(testing,saveMetrics=TRUE)
+testing <- testing[,testing_nzv$nzv==FALSE]
+```
+
+
+## Impute missing date and preprocess
+
+Use KnnImpute, Center and Scale to preprocess and impute data before modelling
+
+```{r}
+preprocess_model <-preProcess(training,method=c('knnImpute', 'center', 'scale'))
+training_preprocessed <- predict(preprocess_model, training)
+training$classe <- training_preprocessed$classe
+```
+
+## Creating Training & Validating Sets
+
+Create training and validating sets
+
+```{r}
+set.seed(5522)
+training_list <- createDataPartition(y=training$classe, p=0.80, list=FALSE)
+training_set <- training[training_list,]
+validating_set <- training[-training_list,]
+```
+
+
+
+
+## Train Model
+
+Train model using Random Forest due to classification target. Set training set to have same columns as test set
+
+```{r}
+set.seed(5522)
+model <- randomForest(classe ~ ., 
+               data=training_set, 
+               na.action = na.omit)
+model
+```
+
+
+
+## Cross Validation
+
+Use cross validation to see training / validating results
+
+```{r}
+predictions <- predict(model, validating_set)
+confusionmatrix <- confusionMatrix(predictions, validating_set$classe)
+confusionmatrix
+```
+
+#Predict with test set
+```{r}
+FinalPredictions <- predict(model, testing, type="class")
+FinalPredictions
+```
